@@ -12,6 +12,7 @@ A client could have multiple alarms at the time (100 per client), so we should t
 For this we have developed a message format. The client can send this message and should receive the answer when the alarm time has come. 
 
 Given is a format for the creation of an alarm:
+
 Bytes 0...3	            Bytes 4...11    	Bytes 12...15   	    Bytes 16...
 Request ID (uint32)	    Due Time (uint64)	Cookie size (uint32)	Cookie data
 
@@ -20,6 +21,7 @@ All integers are serialized in Network Byte Order.
 When the connected client for example sends Request ID = 1 Due Time: actual timestamp (e.g.: 1652873776) Cookie data: Wake up lovely service.
 
 Then the client should receive a message in the following format:
+
 Bytes 0...3	        Bytes 4...7	            Bytes 8...
 Request ID (uint32)	Cookie size (uint32)	Cookie data
 
