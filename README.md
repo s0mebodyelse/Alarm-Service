@@ -14,6 +14,7 @@ For this we have developed a message format. The client can send this message an
 Given is a format for the creation of an alarm:
 
 Bytes 0...3	            Bytes 4...11    	Bytes 12...15   	    Bytes 16...
+
 Request ID (uint32)	    Due Time (uint64)	Cookie size (uint32)	Cookie data
 
 Due Time is the desired alarm time. It is defined as "the number of seconds elapsed since 00:00 hours, Jan 1, 1970 UTC".
@@ -23,6 +24,7 @@ When the connected client for example sends Request ID = 1 Due Time: actual time
 Then the client should receive a message in the following format:
 
 Bytes 0...3	        Bytes 4...7	            Bytes 8...
+
 Request ID (uint32)	Cookie size (uint32)	Cookie data
 
 
