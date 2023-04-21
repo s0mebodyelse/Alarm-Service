@@ -44,18 +44,14 @@ void Session::read_header(){
         [this, self](boost::system::error_code ec, std::size_t length){
             if (!ec) {
                 // create a new request
-                std::cout << "Request incoming" << std::endl;
                 request_t req;
 
                 // read the header into request struct
                 req.requestId = ntohl(inbound_header_[0]);
-                
                 uint32_t high = ntohl(inbound_header_[1]);
                 uint32_t low = ntohl(inbound_header_[2]);
                 req.dueTime = (((uint64_t) low) | ((uint64_t) high) << 32);
                 req.cookieSize = ntohl(inbound_header_[3]);
-
-                //requests_.push_back(req);
 
                 if (requests_.contains(req.requestId)) {
                     // error

@@ -28,10 +28,10 @@ typedef struct {
 class Client {
     public:
         Client(boost::asio::io_context &io_context) 
+            :socket_(tcp::socket(io_context))
         {
             try {
-                socket_ = std::make_shared<tcp::socket>(io_context);
-                socket_->connect(tcp::endpoint(boost::asio::ip::address::from_string(vm["server"].as<std::string>()), vm["port"].as<unsigned short>()));
+                socket_.connect(tcp::endpoint(boost::asio::ip::address::from_string(vm["server"].as<std::string>()), vm["port"].as<unsigned short>()));
             } catch (std::exception &e) {
                 std::cerr << "Error occurred during Client construction: " << e.what() << std::endl;
                 throw;
@@ -42,7 +42,7 @@ class Client {
         void set_timer(uint64_t timestamp);
 
     private:
-        std::shared_ptr<tcp::socket> socket_;
+        tcp::socket socket_;
 
         /* buffers for incoming messages */
         std::vector<uint32_t> inbound_header_{0,0};
@@ -58,32 +58,35 @@ class Client {
 
 void Client::set_timer(uint64_t timestamp) {
     request_t req;
-    req.id = htonl(requests_.size() + 1);
+    req.id = requests_.size() + 1;
     req.timestamp = timestamp;
-    req.cookie_data = "Wake me up";
-    req.cookie_size= htonl(req.cookie_data.length());
-
+    req.cookie_data = "Wake me up, before i go go";
+    req.cookie_size= req.cookie_data.length();
     requests_.push_back(req);
 
-    /* split timestamp */
-    uint32_t low = htonl((uint32_t)(req.timestamp >> 32));
-    uint32_t high = htonl((uint32_t)req.timestamp);
+    uint32_t req_id = htonl(req.id);
+    uint32_t req_cookie_size = htonl(req.cookie_size);
+    uint32_t high = htonl((uint32_t)(req.timestamp >> 32));
+    uint32_t low = htonl((uint32_t)req.timestamp);
 
     /* build buffer */
     std::vector<boost::asio::const_buffer> message;
-    message.push_back(boost::asio::buffer(&req.id, sizeof(uint32_t))); 
+    message.push_back(boost::asio::buffer(&req_id, sizeof(uint32_t))); 
     message.push_back(boost::asio::buffer(&high, sizeof(uint32_t))); 
     message.push_back(boost::asio::buffer(&low, sizeof(uint32_t))); 
-    message.push_back(boost::asio::buffer(&req.cookie_size, sizeof(uint32_t))); 
+    message.push_back(boost::asio::buffer(&req_cookie_size, sizeof(uint32_t))); 
     message.push_back(boost::asio::buffer(req.cookie_data));
 
-    std::cout << "Setting Timer with ID: " << req.id << " and Timestamp: " << timestamp << std::endl;
+    uint64_t temp_timestamp = (((uint64_t) ntohl(low)) | ((uint64_t) ntohl(high)) << 32);
+    std::cout << "Message: " << req.cookie_data << std::endl;
+    std::cout << "Timestamp: " << temp_timestamp << std::endl;
 
     /* async send the header */
-    socket_->async_send(boost::asio::buffer(message),
+    boost::asio::async_write(socket_, message,
         [this, &req](boost::system::error_code ec, std::size_t length){
             if (!ec) {
                 /* handle the response */
+                std::cout << "send len: " << length << std::endl;
                 get_response();
             } else {
                 std::cerr << "Error occurred sending header: " << ec.message() << std::endl;
@@ -94,7 +97,7 @@ void Client::set_timer(uint64_t timestamp) {
 
 void Client::get_response() {
     /* read the header first */
-    socket_->async_receive(boost::asio::buffer(&inbound_header_.front(), 8), 
+    boost::asio::async_read(socket_, boost::asio::buffer(&inbound_header_.front(), 8), 
         [this] (boost::system::error_code ec, std::size_t length) {
             if (!ec) {
                 response_t resp;
@@ -111,7 +114,7 @@ void Client::get_response() {
 }
 
 void Client::print_message(response_t &resp) {
-    socket_->async_receive(boost::asio::buffer(inbound_message_), 
+    boost::asio::async_read(socket_, boost::asio::buffer(inbound_message_), 
         [this, resp] (boost::system::error_code ec, std::size_t length) {
             if (!ec) {
                 std::cout << "Timer up: " << resp.message << std::endl;
@@ -121,54 +124,6 @@ void Client::print_message(response_t &resp) {
         }
     );
 }
-
-/*
-void read_message(const boost::system::error_code &ec, std::size_t bytes_transferred) {
-    if (!ec) {
-        std::cout << "Response: " << inbound_message << std::endl;
-    }
-}
-
-void read_header(const boost::system::error_code &ec, std::size_t bytes_transferred) {
-    if (!ec) {
-        inbound_message.resize(inbound_header[1]);
-        boost::asio::async_read(tcp_socket, boost::asio::buffer(inbound_message, inbound_header[1]), read_message);
-    }
-}
-
-void connect_handler(const boost::system::error_code &ec) {
-    if (!ec) {
-
-        uint32_t request_id = 1223;
-        uint64_t unix_timestamp = chron::duration_cast<chron::seconds>(chron::system_clock::now().time_since_epoch()).count() + SECONDS;
-        std::string cookie_data = "Wake me up";
-        uint32_t cookie_size = cookie_data.length();
-
-        uint32_t low = (uint32_t)(unix_timestamp >> 32);
-        uint32_t high = (uint32_t)unix_timestamp;
-
-        std::vector<boost::asio::const_buffer> header;
-        header.push_back(boost::asio::buffer(&request_id, sizeof(uint32_t))); 
-        header.push_back(boost::asio::buffer(&low, sizeof(uint32_t))); 
-        header.push_back(boost::asio::buffer(&high, sizeof(uint32_t))); 
-        header.push_back(boost::asio::buffer(&cookie_size, sizeof(uint32_t))); 
-
-        boost::asio::write(tcp_socket, header);
-        boost::asio::write(tcp_socket, boost::asio::buffer(cookie_data));
-
-        boost::asio::async_read(tcp_socket, boost::asio::buffer(&inbound_header.front(), 8), read_header);
-
-    }
-}
-
-void resolve_handler(const boost::system::error_code &ec, tcp::resolver::iterator it) {
-    if (!ec) {
-        tcp_socket.async_connect(*it, connect_handler);
-    } else {
-        std::cout << ec.message() << std::endl;
-    }
-}
-*/
 
 int main(int argc, const char *argv[]) {
     
@@ -196,13 +151,15 @@ int main(int argc, const char *argv[]) {
             return 1;
         }
     
-        /* start the io context and send the messages */ 
         std::cout << "Connecting to Server: " << vm["server"].as<std::string>() << ":" << vm["port"].as<unsigned short>() << std::endl;
+
         uint64_t timestamp = chron::duration_cast<chron::seconds>(chron::system_clock::now().time_since_epoch()).count() + SECONDS;
 
+        /* start the io context and set a timer */
         boost::asio::io_service io_context;
         Client timer_client(io_context);
         timer_client.set_timer(timestamp);
+        timer_client.set_timer(timestamp + 5);
         io_context.run();
     } catch (std::exception &e) {
         std::cerr << "Error occurred in main: " << e.what() << std::endl;
