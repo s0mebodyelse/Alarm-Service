@@ -28,10 +28,10 @@ typedef struct {
 class Client {
     public:
         Client(boost::asio::io_context &io_context) 
-            :socket_(tcp::socket(io_context))
+            :socket_(std::make_shared<tcp::socket>(io_context))
         {
             try {
-                socket_.connect(tcp::endpoint(boost::asio::ip::address::from_string(vm["server"].as<std::string>()), vm["port"].as<unsigned short>()));
+                socket_->connect(tcp::endpoint(boost::asio::ip::address::from_string(vm["server"].as<std::string>()), vm["port"].as<unsigned short>()));
             } catch (std::exception &e) {
                 std::cerr << "Error occurred during Client construction: " << e.what() << std::endl;
                 throw;
@@ -42,7 +42,7 @@ class Client {
         void set_timer(uint64_t timestamp);
 
     private:
-        tcp::socket socket_;
+        std::shared_ptr<tcp::socket> socket_;
 
         /* buffers for incoming messages */
         std::vector<uint32_t> inbound_header_{0,0};
@@ -82,7 +82,7 @@ void Client::set_timer(uint64_t timestamp) {
     std::cout << "Timestamp: " << temp_timestamp << std::endl;
 
     /* async send the header */
-    boost::asio::async_write(socket_, message,
+    boost::asio::async_write(*socket_, message,
         [this, &req](boost::system::error_code ec, std::size_t length){
             if (!ec) {
                 /* handle the response */
@@ -97,7 +97,7 @@ void Client::set_timer(uint64_t timestamp) {
 
 void Client::get_response() {
     /* read the header first */
-    boost::asio::async_read(socket_, boost::asio::buffer(&inbound_header_.front(), 8), 
+    boost::asio::async_read(*socket_, boost::asio::buffer(&inbound_header_.front(), 8), 
         [this] (boost::system::error_code ec, std::size_t length) {
             if (!ec) {
                 response_t resp;
@@ -105,6 +105,9 @@ void Client::get_response() {
                 resp.cookie_size = this->inbound_header_[1];
                 this->inbound_message_.resize(resp.cookie_size); 
                 this->responses_.push_back(resp);
+
+                std::cout << "Server responded: " << resp.id << " " << resp.cookie_size << " " << resp.message << std::endl;
+
                 print_message(resp);
             } else {
                 std::cerr << "Error occurred reading response: " << ec.message() << std::endl;
@@ -114,10 +117,11 @@ void Client::get_response() {
 }
 
 void Client::print_message(response_t &resp) {
-    boost::asio::async_read(socket_, boost::asio::buffer(inbound_message_), 
+    boost::asio::async_read(*socket_, boost::asio::buffer(inbound_message_), 
         [this, resp] (boost::system::error_code ec, std::size_t length) {
             if (!ec) {
-                std::cout << "Timer up: " << resp.message << std::endl;
+                std::string cookieData(&inbound_message_[0], inbound_message_.size());
+                std::cout << "Timer up: " << cookieData << std::endl;
             } else {
                 std::cerr << "Error occurred reading response: " << ec.message() << std::endl;
             }
@@ -159,7 +163,6 @@ int main(int argc, const char *argv[]) {
         boost::asio::io_service io_context;
         Client timer_client(io_context);
         timer_client.set_timer(timestamp);
-        timer_client.set_timer(timestamp + 5);
         io_context.run();
     } catch (std::exception &e) {
         std::cerr << "Error occurred in main: " << e.what() << std::endl;
