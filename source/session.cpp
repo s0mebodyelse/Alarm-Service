@@ -4,13 +4,12 @@ using boost::asio::ip::tcp;
 
 int Session::connections = 0;
 
-// the socket gets moved into the session
 Session::Session(tcp::socket socket, boost::asio::io_context &io_context, Server &server)
         :   socket_(std::move(socket)), 
             timer_(io_context),
-            server_(server)
+            server_(server),
+            context_(io_context)
 {       
-    // count the active connections
     connections++;
 }
 
@@ -22,20 +21,21 @@ Session::~Session(){
     }
 }
 
+void Session::open_Server(Server &server){
+    server.open_acceptor();
+}
+
 void Session::start() {
-    // check if the client has more then max timers runnning
     if (requests_.size() >= MAX_TIMERS) {
-        // error
-        // close the connection?
         std::cerr << "to many timers running" << std::endl;
+        return;
     }
     
-    // start by reading the header to get the message length
     read_header();  
 }
 
-void Session::open_Server(Server &server){
-    server.open_acceptor();
+void deliver_response() {
+    
 }
 
 void Session::read_header(){
@@ -43,7 +43,7 @@ void Session::read_header(){
     boost::asio::async_read(socket_, boost::asio::buffer(&inbound_header_.front(), header_length), 
         [this, self](boost::system::error_code ec, std::size_t length){
             if (!ec) {
-                // create a new request
+                std::cout << "New Request incoming" << std::endl;
                 request_t req;
 
                 // read the header into request struct
@@ -54,19 +54,15 @@ void Session::read_header(){
                 req.cookieSize = ntohl(inbound_header_[3]);
 
                 if (requests_.contains(req.requestId)) {
-                    // error
                     std::cerr << "Error: there already is a running request with id: " << req.requestId << std::endl;
-                    // send response to client? close connection?
                 }
 
                 requests_[req.requestId] = req;
 
-                //resize the inbound data vector so the cookiedata can fit
                 inbound_data_.resize(req.cookieSize);
 
                 std::cout << "New Request: " << req.requestId << " " << req.dueTime << " " << req.cookieSize << std::endl; 
 
-                // start reading the cookiedata
                 read_data(req.requestId);
             } else {
                 std::cerr << "Error: async read: " << ec.message() << std::endl;
@@ -87,6 +83,7 @@ void Session::read_data(uint32_t requestId){
                 requests_[requestId].cookieData = cookieData;
 
                 set_timer(requests_[requestId]);
+                read_header();
             } else {
                 std::cerr << "error reading data " << ec.message() << std::endl;
             }
@@ -94,56 +91,50 @@ void Session::read_data(uint32_t requestId){
     );
 }
 
-void Session::respond_client(const request_t &req){            
-
-    // build buffer
+void Session::write_message(){            
+    request_t req = write_responses.front();
+    /* build response buffer */
     std::vector<boost::asio::const_buffer> buffer;
     buffer.push_back(boost::asio::buffer(&req.requestId, sizeof(uint32_t)));
     buffer.push_back(boost::asio::buffer(&req.cookieSize, sizeof(uint32_t)));
-    // in case of cookieData, the buffer can be directly build from std::string
     buffer.push_back(boost::asio::buffer(req.cookieData, req.cookieSize));
 
     // send the buffer to the client
     boost::asio::async_write(socket_, buffer,
-        [this](boost::system::error_code ec, std::size_t length){
+        [this, req](boost::system::error_code ec, std::size_t length){
             if (!ec) {
-                // if everything is going alright, we print the len of the send message
                 std::cout << "send len: " << length << std::endl;                        
+                requests_.erase(req.requestId);
+                write_responses.pop();
+                if (!write_responses.empty()) {
+                    write_message();
+                }
             } else {
                 std::cerr << "error responding client: " << ec.message() << std::endl;
             }
         }
     );
-
-    // Delete the request from the requests vector
-    requests_.erase(req.requestId);
 }
 
 void Session::set_timer(const request_t &req){ 
-    // keep the session alive during the wait operation
     auto self(shared_from_this());
-    
-    // set the timer to wait for 1 second
-    timer_.expires_after(boost::asio::chrono::seconds(1));
-    
-    // start waiting
-    timer_.async_wait(
+
+    using namespace std::chrono;
+    /* sys_time in seconds since the epoch */
+    uint64_t sys_time= duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
+
+    std::cout << "Setting timer in " << req.dueTime - sys_time << " " << "seconds\n";
+
+    /* use shared pointer for the timer */
+    std::shared_ptr<boost::asio::deadline_timer> timer = std::make_shared<boost::asio::deadline_timer>(context_, boost::posix_time::seconds(req.dueTime - sys_time));
+    timers_.push_back(timer); 
+
+    timer->async_wait(
         [this, self, req](boost::system::error_code ec){
             if (!ec) {
-                // get system time
-                using namespace std::chrono;
-                uint64_t sysTime = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
-
-                if (sysTime >= req.dueTime) {
-                    // time is up, respond to client
-                    std::cout << "time is up" << std::endl;
-                    //respond to client
-                    respond_client(req);
-                } else {
-                    //keep on waiting
-                    std::cout << "ID: " << req.requestId << " Waiting..." << std::endl;
-                    set_timer(req);
-                }
+                /* push message in to response queue */
+                write_responses.push(req);
+                write_message();
             } else {
                 std::cerr << "error setting timer: " << ec.message() << " " << ec.value() << std::endl;
             }

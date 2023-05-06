@@ -8,6 +8,7 @@
 #include <utility>
 #include <boost/asio.hpp>
 #include <chrono>
+#include <queue>
 
 #include "server.h"
 
@@ -30,13 +31,14 @@ class Session: public std::enable_shared_from_this<Session> {
         ~Session();
         void open_Server(Server &server);
         void start();
+        void deliver_response();
 
         static int connections;
 
     private:
         void read_header();
         void read_data(uint32_t requestId);
-        void respond_client(const request_t &req);
+        void write_message();
         void set_timer(const request_t &req);
 
         enum {
@@ -45,6 +47,7 @@ class Session: public std::enable_shared_from_this<Session> {
 
         boost::asio::steady_timer timer_;
         boost::asio::ip::tcp::socket socket_;
+        boost::asio::io_context &context_;
         Server &server_;
 
         // buffers, the data is then stored in the request
@@ -52,8 +55,9 @@ class Session: public std::enable_shared_from_this<Session> {
         std::vector<uint32_t> inbound_header_{0,0,0,0};
 
         // hold the data from the request, needs to be a vector or similar
-        //std::vector<request_t> requests_;
         std::unordered_map<uint32_t, request_t> requests_;        
+        std::vector<std::shared_ptr<boost::asio::deadline_timer>> timers_;
+        std::queue<request_t> write_responses;
 };
 
 #endif
