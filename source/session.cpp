@@ -34,10 +34,6 @@ void Session::start() {
     read_header();  
 }
 
-void deliver_response() {
-    
-}
-
 void Session::read_header(){
     auto self(shared_from_this());
     boost::asio::async_read(socket_, boost::asio::buffer(&inbound_header_.front(), header_length), 
