@@ -123,11 +123,12 @@ void Session::set_timer(const request_t &req){
 
     /* use shared pointer for the timer */
     std::shared_ptr<boost::asio::deadline_timer> timer = std::make_shared<boost::asio::deadline_timer>(context_, boost::posix_time::seconds(req.dueTime - sys_time));
-    timers_.push_back(timer); 
+    timers_.insert({req.requestId, timer});
 
     timer->async_wait(
         [this, self, req](boost::system::error_code ec){
             if (!ec) {
+                timers_.erase(req.requestId);
                 /* push message in to response queue */
                 write_responses.push(req);
                 write_message();

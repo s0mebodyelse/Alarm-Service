@@ -31,7 +31,6 @@ class Session: public std::enable_shared_from_this<Session> {
         ~Session();
         void open_Server(Server &server);
         void start();
-        void deliver_response();
 
         static int connections;
 
@@ -56,7 +55,7 @@ class Session: public std::enable_shared_from_this<Session> {
 
         // hold the data from the request, needs to be a vector or similar
         std::unordered_map<uint32_t, request_t> requests_;        
-        std::vector<std::shared_ptr<boost::asio::deadline_timer>> timers_;
+        std::unordered_map<uint32_t, std::shared_ptr<boost::asio::deadline_timer>> timers_;
         std::queue<request_t> write_responses;
 };
 

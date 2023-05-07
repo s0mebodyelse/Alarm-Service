@@ -51,7 +51,7 @@ class Client {
         }
 
         /* set a timer with a unix timestamp */
-        void set_timer(uint64_t timestamp, std::string cookieData);
+        void set_timer(uint32_t id, uint64_t timestamp, std::string cookieData);
         void close();
 
     private:
@@ -87,10 +87,10 @@ void Client::do_connect(const tcp::resolver::results_type &endpoints) {
     );
 }
 
-void Client::set_timer(uint64_t timestamp, std::string cookieData) {
+void Client::set_timer(uint32_t id, uint64_t timestamp, std::string cookieData) {
     /* build the request */
     request_t req;
-    req.id = htonl(requests_.size() + 1);
+    req.id = htonl(id);
     req.timestamp = timestamp;
     req.high_time = htonl((uint32_t)(req.timestamp >> 32));
     req.low_time = htonl((uint32_t)req.timestamp);
@@ -209,11 +209,14 @@ int main(int argc, const char *argv[]) {
 
         std::thread t([&io_context](){io_context.run();});
 
+        uint32_t id = 1;
+
         if (vm["messages"].as<int>() == 2) {
-            timer_client.set_timer(timestamp, first_data);
-            timer_client.set_timer(timestamp + 2, second_data);
+            timer_client.set_timer(id, timestamp, first_data);
+            id++;
+            timer_client.set_timer(id, timestamp + 2, second_data);
         } else {
-            timer_client.set_timer(timestamp, first_data);
+            timer_client.set_timer(id, timestamp, first_data);
         }
 
 
