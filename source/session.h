@@ -9,11 +9,12 @@
 #include <boost/asio.hpp>
 #include <chrono>
 #include <queue>
+#include <exception>
 
 #include "server.h"
 
 #define MAX_CONNECTIONS 10
-#define MAX_TIMERS 5
+#define MAX_TIMERS 100
 
 typedef struct request {
     uint32_t requestId;

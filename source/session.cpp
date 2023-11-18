@@ -73,11 +73,8 @@ void Session::read_data(uint32_t requestId){
         [this, self, requestId](boost::system::error_code ec, std::size_t length){
             if (!ec) {
                 std::string cookieData(&inbound_data_[0], inbound_data_.size());
-
                 std::cout << "Client send: " << cookieData << " in request with id: " << requestId<< std::endl;
-
                 requests_[requestId].cookieData = cookieData;
-
                 set_timer(requests_[requestId]);
                 read_header();
             } else {
@@ -99,10 +96,14 @@ void Session::write_message(){
     boost::asio::async_write(socket_, buffer,
         [this, req](boost::system::error_code ec, std::size_t length){
             if (!ec) {
-                std::cout << "send len: " << length << std::endl;                        
+                std::cout << "send len: " << length << " in reponse to request with id: " << req.requestId << std::endl;                        
+                /* the request is done, erase from requests map */
                 requests_.erase(req.requestId);
+                /* pop the request from the queue */
                 write_responses.pop();
+
                 if (!write_responses.empty()) {
+                    std::cout << "qeue not empty, keep writing" << std::endl;
                     write_message();
                 }
             } else {
@@ -118,7 +119,6 @@ void Session::set_timer(const request_t &req){
     using namespace std::chrono;
     /* sys_time in seconds since the epoch */
     uint64_t sys_time= duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
-
     std::cout << "Setting timer in " << req.dueTime - sys_time << " " << "seconds\n";
 
     /* use shared pointer for the timer */
