@@ -26,7 +26,7 @@ void Session::open_Server(Server &server){
 }
 
 void Session::start() {
-    if (requests_.size() >= MAX_TIMERS) {
+    if (requests.size() >= MAX_TIMERS) {
         std::cerr << "to many timers running" << std::endl;
         return;
     }
@@ -49,16 +49,10 @@ void Session::read_header(){
                 req.dueTime = (((uint64_t) low) | ((uint64_t) high) << 32);
                 req.cookieSize = ntohl(inbound_header_[3]);
 
-                if (requests_.contains(req.requestId)) {
-                    std::cerr << "Error: there already is a running request with id: " << req.requestId << std::endl;
-                }
-
-                requests_[req.requestId] = req;
-
                 inbound_data_.resize(req.cookieSize);
 
                 std::cout << "New Request: " << req.requestId << " " << req.dueTime << " " << req.cookieSize << std::endl; 
-
+                requests.push_back(req);
                 read_data(req.requestId);
             } else {
                 std::cerr << "Error: async read: " << ec.message() << std::endl;
@@ -67,15 +61,21 @@ void Session::read_header(){
     );
 }
 
-void Session::read_data(uint32_t requestId){           
+void Session::read_data(uint32_t request_id){           
     auto self(shared_from_this());
     boost::asio::async_read(socket_, boost::asio::buffer(inbound_data_), 
-        [this, self, requestId](boost::system::error_code ec, std::size_t length){
+        [this, self, request_id](boost::system::error_code ec, std::size_t length){
             if (!ec) {
-                std::string cookieData(&inbound_data_[0], inbound_data_.size());
-                std::cout << "Client send: " << cookieData << " in request with id: " << requestId<< std::endl;
-                requests_[requestId].cookieData = cookieData;
-                set_timer(requests_[requestId]);
+                std::string cookie_data(&inbound_data_[0], inbound_data_.size());
+
+                for (auto &i: requests) {
+                    if (request_id == i.requestId) {
+                        i.cookieData = cookie_data;
+                        std::cout << "Client send: " << i.cookieData << " in request with id: " << i.requestId<< std::endl;
+                        set_timer(i);
+                    }
+                }
+
                 read_header();
             } else {
                 std::cerr << "error reading data " << ec.message() << std::endl;
@@ -96,12 +96,9 @@ void Session::write_message(){
     boost::asio::async_write(socket_, buffer,
         [this, req](boost::system::error_code ec, std::size_t length){
             if (!ec) {
-                std::cout << "send len: " << length << " in reponse to request with id: " << req.requestId << std::endl;                        
-                /* the request is done, erase from requests map */
-                requests_.erase(req.requestId);
                 /* pop the request from the queue */
                 write_responses.pop();
-
+                std::cout << "send len: " << length << " in reponse to request with id: " << req.requestId << std::endl;                        
                 if (!write_responses.empty()) {
                     std::cout << "qeue not empty, keep writing" << std::endl;
                     write_message();
@@ -113,7 +110,7 @@ void Session::write_message(){
     );
 }
 
-void Session::set_timer(const request_t &req){ 
+void Session::set_timer(request_t &req){ 
     auto self(shared_from_this());
 
     using namespace std::chrono;
@@ -123,13 +120,12 @@ void Session::set_timer(const request_t &req){
 
     /* use shared pointer for the timer */
     std::shared_ptr<boost::asio::deadline_timer> timer = std::make_shared<boost::asio::deadline_timer>(context_, boost::posix_time::seconds(req.dueTime - sys_time));
-    timers_.insert({req.requestId, timer});
+    timers.push_back(timer);
 
     timer->async_wait(
         [this, self, req](boost::system::error_code ec){
             if (!ec) {
-                timers_.erase(req.requestId);
-                /* push message in to response queue */
+                /* if the time is up, push the response to the queue*/
                 write_responses.push(req);
                 write_message();
             } else {
