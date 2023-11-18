@@ -92,13 +92,13 @@ void Session::write_message(){
     buffer.push_back(boost::asio::buffer(&req.cookieSize, sizeof(uint32_t)));
     buffer.push_back(boost::asio::buffer(req.cookieData, req.cookieSize));
 
-    // send the buffer to the client
+    write_responses.pop();
+
+    /* send the response back to the client */
     boost::asio::async_write(socket_, buffer,
         [this, req](boost::system::error_code ec, std::size_t length){
             if (!ec) {
-                /* pop the request from the queue */
-                write_responses.pop();
-                std::cout << "send len: " << length << " in reponse to request with id: " << req.requestId << std::endl;                        
+                std::cout << "send len: " << length << "Message: " << req.cookieData << " in reponse to request with id: " << req.requestId << std::endl;                        
                 if (!write_responses.empty()) {
                     std::cout << "qeue not empty, keep writing" << std::endl;
                     write_message();
